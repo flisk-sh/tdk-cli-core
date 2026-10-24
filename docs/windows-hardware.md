@@ -1,6 +1,6 @@
 # Windows hardware checks
 
-Native Windows is **inspection-only** today: `flisk --version`, `flisk doctor` and `flisk up --dry-run` work, and `flisk up` refuses with a pointer to WSL2 Ubuntu. That is the claim in the [README](../README.md#requirements-and-support), and this page does not change it. The decision on whether native Windows gets a runtime is [#1757](https://github.com/flisk-sh/flisk/issues/1757); the acceptance gates it depends on are listed there.
+Native Windows is **inspection-only** today: `flisk --version`, `flisk doctor` and `flisk up --dry-run` work, and `flisk up` refuses with a pointer to WSL2 Ubuntu. That is the claim in the [README](../README.md#requirements-and-support), and this page does not change it. The decision on whether native Windows gets a runtime is recorded in [Maintainers' Decision: Native Windows Runtime Execution](design/native-windows-runtime-decision.md) (RFC [#1757](https://github.com/flisk-sh/flisk/issues/1757)); the decision keeps the inspection-only boundary and the acceptance gates required for any future reconsideration are defined there.
 
 What this page covers is the **evidence** behind the claim on a real Windows machine, which the CI runners cannot provide. Issue [#1765](https://github.com/flisk-sh/flisk/issues/1765) asks for that inventory and for a reproducible way to run it.
 
