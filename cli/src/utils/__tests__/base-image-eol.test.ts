@@ -79,17 +79,66 @@ describe("base image reference scan", () => {
     ['"node:22.12-alpine@sha256:0a7108bf"', ["node:22-alpine"]],
     ["FROM alpine:3.22", ["alpine:3.22"]],
     ["FROM alpine:3.22.1", ["alpine:3.22"]],
+    ["FROM alpine:3.21.0", ["alpine:3.21"]],
+    ["FROM node:20-alpine", ["node:20-alpine"]],
+    ["FROM node:18.19.0-alpine", ["node:18-alpine"]],
     ["FROM oven/bun:1.3.11-alpine", []],
     ["FROM node:22-slim", []],
+    ["FROM debian:bookworm", []],
+    ["FROM ubuntu:24.04", []],
+    ["# just a comment without images", []],
   ])("%s -> %j", (text, expected) => {
     expect(baseImageRefs(text)).toEqual(expected);
   });
 
-  it("checks a versioned reference against the EOL table", () => {
+  it("extracts multiple base image references in multi-stage builds", () => {
+    const multiStage = `
+      FROM node:22.12-alpine AS builder
+      WORKDIR /app
+      RUN npm run build
+
+      FROM alpine:3.22.1 AS runner
+      COPY --from=builder /app/dist /dist
+    `;
+    expect(baseImageRefs(multiStage)).toEqual(["node:22-alpine", "alpine:3.22"]);
+  });
+
+  it("checks versioned references against EOL table", () => {
     const refs = baseImageRefs("FROM node:20.11-alpine");
     expect(refsWithoutEolEntry(refs, BASE_IMAGE_EOL)).toEqual(["node:20-alpine"]);
     expect(refsPastEol(refs, { "node:20-alpine": "2026-04-30" }, "2026-10-16")).toEqual([
       "node:20-alpine",
+    ]);
+  });
+
+  it("correctly handles EOL boundary dates", () => {
+    const schedule = {
+      "alpine:3.20": "2025-11-01",
+      "alpine:3.21": "2026-05-01",
+      "alpine:3.22": "2027-05-01",
+    };
+
+    // On exact EOL date, it is not yet expired (< comparison)
+    expect(refsPastEol(["alpine:3.21"], schedule, "2026-05-01")).toEqual([]);
+
+    // One day after EOL date, it is expired
+    expect(refsPastEol(["alpine:3.21"], schedule, "2026-05-02")).toEqual(["alpine:3.21"]);
+
+    // Before EOL date, it is valid
+    expect(refsPastEol(["alpine:3.22"], schedule, "2026-05-02")).toEqual([]);
+  });
+
+  it("detects when all base image references have valid EOL entries", () => {
+    const refs = ["alpine:3.22", "node:22-alpine"];
+    expect(refsWithoutEolEntry(refs, BASE_IMAGE_EOL)).toEqual([]);
+  });
+
+  it("identifies multiple undocumented base image references", () => {
+    const refs = ["alpine:3.18", "alpine:3.19", "node:16-alpine"];
+    expect(refsWithoutEolEntry(refs, BASE_IMAGE_EOL)).toEqual([
+      "alpine:3.18",
+      "alpine:3.19",
+      "node:16-alpine",
     ]);
   });
 });
