@@ -3,9 +3,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureExit } from "../../test-support/index.js";
 import type { CheckResult } from "../../types/index.js";
+import { WEBCONTAINER_DOCS, WEBCONTAINER_UP_MESSAGE } from "../../utils/agent-host.js";
+import { CONTAINER_RUNTIME_CHECK } from "../../utils/constants.js";
 import { checkHostPorts } from "../../utils/doctor-runtime.js";
 import {
   checkBun,
@@ -13,11 +15,17 @@ import {
   checkPublishedBindAddress,
   checkTilt,
   checkWslProjectLocation,
+  type DoctorCheckFn,
   doctorCommand,
+  formatDoctorSummary,
+  getDoctorOutcomeMessage,
+  isContainerDependentCheck,
   MIN_BUN_VERSION,
   MIN_TILT_VERSION,
   NATIVE_WINDOWS_DOCTOR_MESSAGE,
   orderDoctorResults,
+  requiresContainerRuntime,
+  runChecks,
   versionMeetsMinimum,
 } from "../doctor.js";
 
@@ -208,5 +216,174 @@ describe("doctor environment contract", () => {
       log.mockRestore();
       error.mockRestore();
     }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    doctorCommand.setOptionValue("json", false);
+    doctorCommand.setOptionValue("all", false);
+    doctorCommand.setOptionValue("ping", true);
+    doctorCommand.setOptionValue("pingTimeout", "3000");
+    doctorCommand.setOptionValue("strict", false);
+    doctorCommand.setOptionValue("fix", false);
+    doctorCommand.setOptionValue("dryRun", false);
+    doctorCommand.setOptionValue("scope", "project");
+    doctorCommand.setOptionValue("yes", false);
+  });
+
+  it("enforces CLI flag constraints for --scope, --dry-run, and --yes in text mode", async () => {
+    const cases = [
+      {
+        args: ["--scope", "invalid", "--fix"],
+        expectedError: '--scope must be project or machine, got "invalid"',
+      },
+      {
+        args: ["--scope", "machine"],
+        expectedError: "--scope only applies with --fix",
+      },
+      {
+        args: ["--dry-run"],
+        expectedError: "--dry-run only applies with --fix",
+      },
+      {
+        args: ["--yes"],
+        expectedError: "--yes only applies with --fix",
+      },
+    ];
+
+    for (const { args, expectedError } of cases) {
+      const { exit } = captureExit();
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await expect(doctorCommand.parseAsync(args, { from: "user" })).rejects.toThrow(
+          "process.exit",
+        );
+        expect(exit).toHaveBeenCalledWith(2);
+        expect(errorSpy).toHaveBeenCalledWith(expectedError);
+      } finally {
+        exit.mockRestore();
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+        doctorCommand.setOptionValue("fix", false);
+        doctorCommand.setOptionValue("dryRun", false);
+        doctorCommand.setOptionValue("scope", "project");
+        doctorCommand.setOptionValue("yes", false);
+      }
+    }
+  });
+
+  it("refuses WebContainers with clear documentation and exit code 1", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    const { exit } = captureExit();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const versions = process.versions as Record<string, string | undefined>;
+    const prevWebContainer = versions.webcontainer;
+    try {
+      Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
+      versions.webcontainer = "1";
+
+      await expect(doctorCommand.parseAsync([], { from: "user" })).rejects.toThrow("process.exit");
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(WEBCONTAINER_UP_MESSAGE);
+      expect(WEBCONTAINER_UP_MESSAGE).toContain(WEBCONTAINER_DOCS);
+    } finally {
+      if (prevWebContainer !== undefined) {
+        versions.webcontainer = prevWebContainer;
+      } else {
+        delete versions.webcontainer;
+      }
+      if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
+      exit.mockRestore();
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("cascades container runtime failure to dependent checks in runChecks", async () => {
+    const runtimeFailure: DoctorCheckFn = () => ({
+      name: CONTAINER_RUNTIME_CHECK,
+      didPass: false,
+      message: "Docker daemon not running",
+    });
+
+    let composeCalled = false;
+    const composeCheck: DoctorCheckFn = requiresContainerRuntime("Docker Compose", () => {
+      composeCalled = true;
+      return { name: "Docker Compose", didPass: true, message: "Docker Compose v2.20" };
+    });
+
+    let osCheckCalled = false;
+    const checkDockerOperatingSystem: DoctorCheckFn = () => {
+      osCheckCalled = true;
+      return { name: "Docker OS", didPass: true, message: "Linux engine" };
+    };
+
+    let bunCalled = false;
+    const bunCheck: DoctorCheckFn = () => {
+      bunCalled = true;
+      return { name: "Bun CLI", didPass: true, message: "Bun 1.2.0 installed" };
+    };
+
+    expect(isContainerDependentCheck(composeCheck)).toBe(true);
+    expect(isContainerDependentCheck(checkDockerOperatingSystem)).toBe(true);
+    expect(isContainerDependentCheck(bunCheck)).toBe(false);
+
+    const results = await runChecks(
+      [runtimeFailure, composeCheck, checkDockerOperatingSystem, bunCheck],
+      { all: true },
+    );
+
+    expect(composeCalled).toBe(false);
+    expect(osCheckCalled).toBe(false);
+    expect(bunCalled).toBe(true);
+
+    expect(results).toHaveLength(4);
+    expect(results[0].name).toBe(CONTAINER_RUNTIME_CHECK);
+    expect(results[0].didPass).toBe(false);
+
+    expect(results[1].name).toBe("Docker Compose");
+    expect(results[1].didPass).toBe(true);
+    expect(results[1].isSkipped).toBe(true);
+    expect(results[1].message).toContain("Docker not running - skipped Docker Compose check");
+
+    expect(results[2].name).toBe("Docker OS");
+    expect(results[2].didPass).toBe(true);
+    expect(results[2].isSkipped).toBe(true);
+    expect(results[2].message).toContain("Docker not running - skipped Docker OS check");
+
+    expect(results[3].name).toBe("Bun CLI");
+    expect(results[3].didPass).toBe(true);
+    expect(results[3].isSkipped).toBeFalsy();
+  });
+
+  it("formats doctor summary and outcome message under all combinations", () => {
+    expect(
+      formatDoctorSummary([
+        { name: "C1", didPass: true, message: "ok" },
+        { name: "C2", didPass: true, message: "ok" },
+        { name: "C3", didPass: false, message: "fail" },
+        { name: "C4", didPass: true, isSkipped: true, message: "skip" },
+      ]),
+    ).toBe("2 passed, 1 failed, 1 skipped");
+
+    expect(
+      formatDoctorSummary([
+        { name: "C1", didPass: true, message: "ok" },
+        { name: "C2", didPass: true, isWarning: true, message: "warn" },
+        { name: "C3", didPass: false, message: "fail" },
+        { name: "C4", didPass: true, isSkipped: true, message: "skip" },
+      ]),
+    ).toBe("1 passed, 1 warned, 1 failed, 1 skipped");
+
+    expect(getDoctorOutcomeMessage(true, true)).toBe("Doctor passed. Next: flisk up");
+    expect(getDoctorOutcomeMessage(true, false)).toBe(
+      "Doctor failed. Fix the items above, then run: flisk doctor",
+    );
+    expect(getDoctorOutcomeMessage(false, true)).toBe("Doctor passed. Next: flisk project example");
+    expect(getDoctorOutcomeMessage(false, false)).toBe(
+      "Doctor failed. Fix the items above, then run: flisk doctor",
+    );
   });
 });
