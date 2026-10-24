@@ -15,9 +15,10 @@ tests/e2e/resource-types/bring-your-own/verify-byo-example.sh fastify          #
 scripts/sync-byo-templates.sh vue && tests/e2e/resource-types/bring-your-own/verify-byo-example.sh create-vue /   # synced template; Vite apps answer on /
 ```
 
-`create-vue` and `create-next-app` live in their own repositories, [flisk-template-vue](https://github.com/flisk-sh/flisk-template-vue)
-and [flisk-template-next-app](https://github.com/flisk-sh/flisk-template-next-app), each with its own `verify` and `flisk up`
-`e2e` checks. [`templates.json`](templates.json) pins each one to a release tag, and `scripts/sync-byo-templates.sh` copies it
+`create-vue`, `create-next-app`, `create-adonisjs`, `create-analog` and `create-bati` live in their own repositories,
+[flisk-template-vue](https://github.com/flisk-sh/flisk-template-vue), [flisk-template-next-app](https://github.com/flisk-sh/flisk-template-next-app),
+[flisk-template-adonisjs](https://github.com/flisk-sh/flisk-template-adonisjs), [flisk-template-analog](https://github.com/flisk-sh/flisk-template-analog)
+and [flisk-template-bati](https://github.com/flisk-sh/flisk-template-bati), each with its own `verify` and `flisk up` `e2e` checks. [`templates.json`](templates.json) pins each one to a release tag, and `scripts/sync-byo-templates.sh` copies it
 here; the copies are git-ignored. Change a template in its repository, then bump its tag in `templates.json`.
 
 An app that needs another resource (a database server, for example [turso-app](turso-app/README.md) with [turso](turso/README.md))

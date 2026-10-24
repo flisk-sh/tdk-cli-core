@@ -53,6 +53,21 @@
       "args": "create-next-app /"
     },
     {
+      "id": "template-adonisjs",
+      "case": "BY1",
+      "args": "create-adonisjs /"
+    },
+    {
+      "id": "template-analog",
+      "case": "BY1",
+      "args": "create-analog /"
+    },
+    {
+      "id": "template-bati",
+      "case": "BY1",
+      "args": "create-bati /"
+    },
+    {
       "id": "flisk",
       "case": "BY2",
       "args": "full-stack-fastapi-template /api/v1/utils/health-check/"

@@ -27,7 +27,8 @@ export function shellQuote(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 function runHostCommand(exec, command, args, shellCommand, options) {
-    if (process.platform === "win32") {
+    // A supplied custom executor wins on every platform, including Windows.
+    if (process.platform === "win32" && exec === execSync) {
         return execFileSync(findOnPath(command) ?? command, args, {
             ...options,
             windowsHide: true,

@@ -120,7 +120,8 @@ VERIFY_WAIT_SECONDS=120 tests/e2e/resource-types/bring-your-own/verify-byo-examp
 
 The check builds the image, runs it with `PORT=4000` and expects HTTP 200. Folders named `create-*`, `ember`, `rsbuild`
 and similar run the real scaffolder at build time, so they stay in step with it.
-`create-vue` and `create-next-app` come from their own template repositories at the tag pinned in
+The `create-*` folders listed in `examples/byo/templates.json` (`create-vue`, `create-next-app`, `create-adonisjs`,
+`create-analog`, `create-bati`) come from their own template repositories at the tag pinned in
 [`examples/byo/templates.json`](../examples/byo/templates.json); run `scripts/sync-byo-templates.sh` to copy them in first.
 
 Recipes for using Flisk next to other tools live in [`recipes/`](recipes/): [moon](recipes/moon.md), [Rsbuild](recipes/rsbuild.md).
