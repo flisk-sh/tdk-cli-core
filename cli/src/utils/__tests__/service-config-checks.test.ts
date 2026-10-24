@@ -294,4 +294,126 @@ describe("schemaVersion", () => {
     };
     expect(() => enforceServiceConfigGate(root, {}, exit)).not.toThrow();
   });
+
+  it("handles object, boolean, and null schemaVersions as unsupported", () => {
+    service("svc-obj", { schemaVersion: { version: 1 } });
+    service("svc-bool", { schemaVersion: true });
+    service("svc-null", { schemaVersion: null });
+    const result = checkSchemaVersions(root);
+    expect(result.didPass).toBe(false);
+    expect(result.message).toContain("3 service.json files without a supported schemaVersion");
+    expect(result.message).toContain('schemaVersion {"version":1}');
+    expect(result.message).toContain("schemaVersion true");
+    expect(result.message).toContain("schemaVersion null");
+  });
+
+  it("supports pre-discovered resources passed to checkSchemaVersions and warnSchemaVersions", () => {
+    const resources = [
+      {
+        name: "custom-api",
+        path: join(root, "apps/custom-api"),
+        configPath: join(root, "apps/custom-api/service.json"),
+        config: {
+          appName: "custom-api",
+          appType: "backend",
+          stack: "app",
+          schemaVersion: 1,
+        } as never,
+      },
+    ];
+    expect(checkSchemaVersions(root, false, resources).didPass).toBe(true);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    warnSchemaVersions(root, resources);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("additional edge cases across service config checks", () => {
+  const exit = (code: number): never => {
+    throw new Error(`exit ${code}`);
+  };
+
+  it("orders a multi-node cycle alphabetically starting from the lowest name", () => {
+    // Cycle: d -> c -> b -> a -> d
+    service("d", { dependsOn: ["c"] });
+    service("c", { dependsOn: ["b"] });
+    service("b", { dependsOn: ["a"] });
+    service("a", { dependsOn: ["d"] });
+
+    const result = checkCircularDependencies(root);
+    expect(result.didPass).toBe(false);
+    expect(result.message).toContain("a -> d -> c -> b -> a");
+  });
+
+  it("formats plural message when multiple services have invalid dependsOn", () => {
+    service("svc-1", { dependsOn: "single-string" });
+    service("svc-2", { dependsOn: [123, null] });
+
+    const result = checkDependsOnShape(root);
+    expect(result.didPass).toBe(false);
+    expect(result.message).toContain("2 invalid dependsOn:\n");
+    expect(result.message).toContain('dependsOn "single-string"');
+    expect(result.message).toContain("dependsOn [123,null]");
+  });
+
+  it("rejects non-finite, boolean, and object ports with plural count", () => {
+    service("svc-nan", { port: Number.NaN });
+    service("svc-inf", { port: Number.POSITIVE_INFINITY });
+    service("svc-bool", { port: true });
+    service("svc-obj", { port: { val: 4000 } });
+
+    const result = checkServicePorts(root);
+    expect(result.didPass).toBe(false);
+    expect(result.message).toContain("4 invalid ports:\n");
+    expect(result.message).toContain("port null"); // JSON.stringify(NaN) and JSON.stringify(Infinity) are null
+    expect(result.message).toContain("port true");
+    expect(result.message).toContain('port {"val":4000}');
+  });
+
+  it("passes pre-discovered resources to enforceServiceConfigGate without reading root", () => {
+    const validPreDiscovered = [
+      {
+        name: "pre-api",
+        path: join(root, "apps/pre-api"),
+        configPath: join(root, "apps/pre-api/service.json"),
+        config: {
+          appName: "pre-api",
+          appType: "backend",
+          stack: "app",
+          port: 3000,
+          dependsOn: [],
+          schemaVersion: 1,
+        } as never,
+      },
+    ];
+
+    expect(() =>
+      enforceServiceConfigGate(root, { resources: validPreDiscovered }, exit),
+    ).not.toThrow();
+  });
+
+  it("reports all 4 gate failures simultaneously when all checks fail", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // 1. Duplicate resource name: two services named "shared-name"
+    service("shared-name", { port: 99999, dependsOn: "invalid-shape" }, "app/svc1");
+    service("shared-name", { port: 88888, dependsOn: ["loop-b"] }, "app/svc2");
+    // 2. Circular dependency: loop-a <-> loop-b
+    service("loop-a", { dependsOn: ["loop-b"] }, "app/loop-a");
+    service("loop-b", { dependsOn: ["loop-a"] }, "app/loop-b");
+
+    let reported = "";
+    expect(() =>
+      enforceServiceConfigGate(root, { onInvalid: (message) => (reported = message) }, exit),
+    ).toThrow("exit 1");
+
+    // Check duplicate names reported
+    expect(reported).toContain("appName used by more than one resource");
+    // Check invalid dependsOn reported
+    expect(reported).toContain("invalid dependsOn");
+    // Check circular dependencies reported
+    expect(reported).toContain("circular dependency");
+    // Check invalid ports reported
+    expect(reported).toContain("invalid port");
+  });
 });
